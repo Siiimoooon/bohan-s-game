@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuromi's Sokoban - 8 Boxes Symmetry</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap');
+        body { background-color: #0d0d16; font-family: 'ZCOOL KuaiLe', cursive, sans-serif; color: #e2e8f0; overflow: hidden; }
+        canvas { image-rendering: auto; max-width: 100%; height: auto; cursor: pointer; box-shadow: 0 0 30px rgba(168, 85, 247, 0.6); border-radius: 1.5rem; }
+        .kuromi-border { border: 3px solid #a855f7; box-shadow: 0 0 20px #a855f7, inset 0 0 10px #a855f7; }
+        .btn-kuromi { background: linear-gradient(135deg, #7e22ce 0%, #db2777 100%); @apply text-white font-bold py-2 rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-lg border border-pink-400/30; }
+        .btn-secondary { background: #1e1b4b; @apply text-purple-300 font-bold py-2 rounded-2xl border border-purple-500/30 transition-all hover:bg-purple-900/50; }
+        .neon-text { text-shadow: 0 0 8px #ff00ff, 0 0 15px #ff00ff; }
+        .stat-box { background: rgba(15, 15, 30, 0.8); border: 1px solid rgba(168, 85, 247, 0.3); @apply px-4 py-1 rounded-xl; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="max-w-xl w-full bg-[#16162a]/95 p-8 rounded-[3rem] border-2 border-purple-500/40 shadow-2xl relative">
+        <div class="absolute -top-20 -right-20 w-56 h-56 bg-pink-600/10 rounded-full blur-[80px]"></div>
+        <div class="absolute -bottom-20 -left-20 w-56 h-56 bg-purple-600/10 rounded-full blur-[80px]"></div>
+
+        <div class="mb-4 text-center relative z-10">
+            <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-500 to-purple-500 italic tracking-tighter neon-text">
+                KUROMI SYMMETRY
+            </h1>
+            <p class="text-[10px] text-purple-400 mt-1 italic">8 箱對稱陣型 - 庫洛米挑戰中</p>
+        </div>
+
+        <div class="relative flex justify-center mb-6">
+            <canvas id="gameCanvas" width="300" height="300" class="bg-[#050510] kuromi-border"></canvas>
+            
+            <div id="victoryOverlay" class="absolute inset-0 bg-black/90 flex items-center justify-center hidden rounded-3xl z-30">
+                <div class="text-center p-8">
+                    <div class="text-7xl mb-4">🖤</div>
+                    <div class="text-3xl font-bold text-pink-400 neon-text italic">完美解法！</div>
+                    <button onclick="resetGame()" class="mt-8 px-10 py-3 btn-kuromi">重新挑戰</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="playStats" class="flex justify-between items-center mb-6 gap-4">
+            <div class="stat-box flex-1 text-center">
+                <span class="text-slate-500 text-[10px] block uppercase italic">Progress</span>
+                <span id="progressText" class="text-pink-400 font-bold text-lg">0/8</span>
+            </div>
+            <div class="stat-box flex-1 text-center">
+                <span class="text-slate-500 text-[10px] block uppercase italic">Moves</span>
+                <span id="stepText" class="text-purple-400 font-bold text-lg">0</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mb-6">
+            <button onclick="resetGame()" class="btn-secondary text-sm py-3">重置 (R)</button>
+            <button onclick="undoMove()" class="btn-secondary text-sm py-3">撤銷 (U)</button>
+        </div>
+
+        <div id="mobileControls" class="grid grid-cols-3 gap-2 w-40 mx-auto opacity-70">
+            <button class="col-start-2 w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center border border-purple-500/20" onclick="handleMove(0, -1)">▲</button>
+            <button class="col-start-1 w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center border border-purple-500/20" onclick="handleMove(-1, 0)">◀</button>
+            <button class="col-start-2 w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center border border-purple-500/20" onclick="handleMove(0, 1)">▼</button>
+            <button class="col-start-3 w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center border border-purple-500/20" onclick="handleMove(1, 0)">▶</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const victoryOverlay = document.getElementById('victoryOverlay');
+        
+        const ROWS = 5; const COLS = 5; const TILE_SIZE = 60;
+
+        // 地圖設定：2=目標點, 0=地板
+        let staticMap = [
+            [2, 0, 2, 0, 2],
+            [0, 0, 0, 0, 0],
+            [2, 0, 0, 0, 2],
+            [0, 0, 0, 0, 0],
+            [2, 0, 2, 0, 2]
+        ];
+
+        let startState = {
+            player: { r: 2, c: 2 },
+            boxes: [
+                { r: 1, c: 1 }, { r: 1, c: 2 }, { r: 1, c: 3 },
+                { r: 2, c: 1 },                 { r: 2, c: 3 },
+                { r: 3, c: 1 }, { r: 3, c: 2 }, { r: 3, c: 3 }
+            ]
+        };
+
+        let gameState = { ...JSON.parse(JSON.stringify(startState)), steps: 0 };
+        let history = [];
+
+        function drawKuromi(x, y) {
+            ctx.save(); ctx.translate(x + TILE_SIZE/2, y + TILE_SIZE/2);
+            ctx.fillStyle = '#111'; ctx.beginPath(); ctx.moveTo(-18, -10); ctx.lineTo(-24, -28); ctx.lineTo(-8, -15); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(18, -10); ctx.lineTo(24, -28); ctx.lineTo(8, -15); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(0, 0, 20, 18, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(0, 3, 16, 13, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(-6, 3, 2, 4, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(6, 3, 2, 4, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#db2777'; ctx.beginPath(); ctx.arc(0, -9, 3, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+
+        function drawBox(x, y, onTarget) {
+            const p = 12; const size = TILE_SIZE - p * 2;
+            ctx.fillStyle = onTarget ? '#9333ea' : '#4c1d95';
+            ctx.beginPath(); ctx.roundRect(x+p, y+p, size, size, 8); ctx.fill();
+            ctx.fillStyle = '#db2777'; ctx.fillRect(x + TILE_SIZE/2 - 2, y + p, 4, size); ctx.fillRect(x + p, y + TILE_SIZE/2 - 2, size, 4);
+            ctx.fillStyle = onTarget ? '#f472b6' : '#9d174d';
+            ctx.font = '10px Arial'; ctx.textAlign = 'center'; ctx.fillText('🖤', x + TILE_SIZE/2, y + TILE_SIZE/2 + 4);
+        }
+
+        function drawTarget(x, y) {
+            ctx.save(); ctx.translate(x + TILE_SIZE/2, y + TILE_SIZE/2);
+            ctx.fillStyle = '#db277722'; ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#f472b6'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(0, 8); ctx.bezierCurveTo(-15, -2, -15, -12, 0, -12); ctx.bezierCurveTo(15, -12, 15, -2, 0, 8); ctx.stroke();
+            ctx.restore();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = '#050510'; ctx.fillRect(0,0, canvas.width, canvas.height);
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const x = c * TILE_SIZE, y = r * TILE_SIZE;
+                    if (staticMap[r][c] === 2) drawTarget(x, y);
+                    else { ctx.strokeStyle = '#1a1a2e'; ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE); }
+                }
+            }
+            let correct = 0;
+            gameState.boxes.forEach(box => {
+                const onTarget = staticMap[box.r][box.c] === 2;
+                if (onTarget) correct++;
+                drawBox(box.c*TILE_SIZE, box.r*TILE_SIZE, onTarget);
+            });
+            drawKuromi(gameState.player.c*TILE_SIZE, gameState.player.r*TILE_SIZE);
+            
+            document.getElementById('progressText').innerText = `${correct}/8`;
+            document.getElementById('stepText').innerText = gameState.steps;
+            if (correct === 8) victoryOverlay.classList.remove('hidden');
+        }
+
+        function executeMove(dc, dr) {
+            const nr = gameState.player.r + dr, nc = gameState.player.c + dc;
+            if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return false;
+            
+            const bIdx = gameState.boxes.findIndex(b => b.r === nr && b.c === nc);
+            if (bIdx !== -1) {
+                const bnr = nr + dr, bnc = nc + dc;
+                if (bnr < 0 || bnr >= ROWS || bnc < 0 || bnc >= COLS || gameState.boxes.some(b => b.r === bnr && b.c === bnc)) return false;
+                history.push(JSON.stringify(gameState));
+                gameState.boxes[bIdx].r = bnr; gameState.boxes[bIdx].c = bnc;
+            } else { 
+                history.push(JSON.stringify(gameState)); 
+            }
+            
+            gameState.player.r = nr; gameState.player.c = nc; gameState.steps++;
+            draw(); return true;
+        }
+
+        function handleMove(dc, dr) { executeMove(dc, dr); }
+        function undoMove() { if (history.length > 0) { gameState = JSON.parse(history.pop()); draw(); } }
+        function resetGame() { gameState = JSON.parse(JSON.stringify(startState)); gameState.steps = 0; history = []; victoryOverlay.classList.add('hidden'); draw(); }
+
+        draw();
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'r' || e.key === 'R') resetGame();
+            if (e.key === 'u' || e.key === 'U') undoMove();
+            const m = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] };
+            if (m[e.key]) handleMove(...m[e.key]);
+        });
+    </script>
+</body>
+</html>
